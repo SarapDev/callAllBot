@@ -4,21 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
 	"strconv"
 	"sync"
 )
 
-var telegramUrl = os.Getenv("TELEGRAM_BOT_URL")
+var offset int64
 
-func mentionAll(admins []Admin, chatId int64) {
-	client := &http.Client{}
-	req, err := http.NewRequest("POST", telegramUrl+"/sendMessage", nil)
-
-	if err != nil {
-		fmt.Println(err)
-	}
-
+func mentionAll(admins []Admin, chatId int64, telegramUrl string) {
 	c := make(chan string, len(admins))
 	wg := sync.WaitGroup{}
 
@@ -37,21 +29,17 @@ func mentionAll(admins []Admin, chatId int64) {
 		text += i + " "
 	}
 
-	q := req.URL.Query()
-	q.Add("chat_id", strconv.FormatInt(chatId, 10))
-	q.Add("text", text)
-	q.Add("parse_mode", "MarkdownV2")
-	req.URL.RawQuery = q.Encode()
+	query := make(map[string]string)
+	query["chat_id"] = strconv.FormatInt(chatId, 10)
+	query["text"] = text
+	query["parse_mode"] = "HTML"
 
-	resp, err := client.Do(req)
-	if err != nil {
-		fmt.Println(err)
-	}
+	resp := makeRequest("POST", telegramUrl+"/sendMessage", query)
 
 	defer resp.Body.Close()
 
 	var data interface{}
-	err = json.NewDecoder(resp.Body).Decode(&data)
+	err := json.NewDecoder(resp.Body).Decode(&data)
 
 	if err != nil {
 		fmt.Println(err)
@@ -61,46 +49,41 @@ func mentionAll(admins []Admin, chatId int64) {
 }
 
 func mentionUser(u User, c chan string, wg *sync.WaitGroup) {
-	c <- "\\[" + u.Username + "\\](tg://user?id=" + strconv.FormatInt(u.Id, 10) + ")"
+	//<a href="tg://user?id=123456789">inline mention of a user</a>
+	c <- "<a href=\"tg://user?id=" + strconv.FormatInt(u.Id, 10) + "\">" + u.Username + "</a>"
+
 	wg.Done()
 }
 
-func getAllAdmin(m Message) []Admin {
-	client := &http.Client{}
-	req, err := http.NewRequest("GET", telegramUrl+"/getChatAdministrators", nil)
-	if err != nil {
-		fmt.Println(err)
-	}
+func getAllAdmin(m Message, telegramUrl string) []Admin {
+	query := make(map[string]string)
+	query["chat_id"] = strconv.FormatInt(m.Chat.Id, 10)
 
-	q := req.URL.Query()
-	q.Add("chat_id", strconv.FormatInt(m.Chat.Id, 10))
-	req.URL.RawQuery = q.Encode()
-
-	resp, err := client.Do(req)
-	if err != nil {
-		fmt.Println(err)
-	}
+	resp := makeRequest("GET", telegramUrl+"/getChatAdministrators", query)
 
 	defer resp.Body.Close()
 
 	var data AllAdminResponse
-	err = json.NewDecoder(resp.Body).Decode(&data)
+	err := json.NewDecoder(resp.Body).Decode(&data)
+	if err != nil {
+		fmt.Println(err)
+	}
 
 	return data.Result
 }
 
-func GetUpdate() error {
+func GetUpdate(telegramUrl string) error {
 	var data Updates
-	resp, err := http.Get(telegramUrl + "/getUpdates")
-
-	if err != nil {
-		fmt.Println(err)
-		return err
+	query := make(map[string]string)
+	if offset != 0 {
+		query["offset"] = strconv.FormatInt(offset, 10)
 	}
+
+	resp := makeRequest("GET", telegramUrl+"/getUpdates", query)
 
 	defer resp.Body.Close()
 
-	err = json.NewDecoder(resp.Body).Decode(&data)
+	err := json.NewDecoder(resp.Body).Decode(&data)
 
 	if err != nil {
 		fmt.Println(err)
@@ -109,12 +92,32 @@ func GetUpdate() error {
 
 	resultLastElem := len(data.Result) - 1
 	lastUpdate := data.Result[resultLastElem]
+	offset = lastUpdate.Id
 
 	if lastUpdate.Message.Text == "/all@call_all_users_bot" {
-		admins := getAllAdmin(lastUpdate.Message)
-		fmt.Println(admins[0])
-		mentionAll(admins, lastUpdate.Message.Chat.Id)
+		admins := getAllAdmin(lastUpdate.Message, telegramUrl)
+		mentionAll(admins, lastUpdate.Message.Chat.Id, telegramUrl)
 	}
 
 	return nil
+}
+
+func makeRequest(method string, url string, query map[string]string) *http.Response {
+	client := &http.Client{}
+	req, err := http.NewRequest(method, url, nil)
+	if err != nil {
+		fmt.Println(err)
+	}
+
+	q := req.URL.Query()
+	for key, value := range query {
+		q.Add(key, value)
+	}
+	req.URL.RawQuery = q.Encode()
+
+	resp, err := client.Do(req)
+	if err != nil {
+		fmt.Println(err)
+	}
+	return resp
 }
