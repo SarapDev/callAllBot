@@ -72,6 +72,26 @@ func getAllAdmin(m Message, telegramUrl string) []Admin {
 	return data.Result
 }
 
+func sendJoke(chatId int64, telegramUrl string) {
+	text := "Мама собирает сыну обед в школу:\n— Вот, положила тебе в ранец хлеб, колбасу и гвозди.\n— Мам, нафига??\n— Ну как же, берешь хлеб, кладешь на него колбасу и ешь.\n— А гвозди?\n— Так вот же они!"
+
+	query := make(map[string]string)
+	query["chat_id"] = strconv.FormatInt(chatId, 10)
+	query["text"] = text
+	query["parse_mode"] = "HTML"
+
+	resp := makeRequest("POST", telegramUrl+"/sendMessage", query)
+
+	defer resp.Body.Close()
+
+	var data interface{}
+	err := json.NewDecoder(resp.Body).Decode(&data)
+
+	if err != nil {
+		fmt.Println(err)
+	}
+}
+
 func GetUpdate(telegramUrl string) error {
 	var data Updates
 	query := make(map[string]string)
@@ -91,12 +111,20 @@ func GetUpdate(telegramUrl string) error {
 	}
 
 	resultLastElem := len(data.Result) - 1
+	if resultLastElem == -1 {
+		return nil
+	}
+
 	lastUpdate := data.Result[resultLastElem]
-	offset = lastUpdate.Id
+	offset = lastUpdate.Id + 1
 
 	if lastUpdate.Message.Text == "/all@call_all_users_bot" {
 		admins := getAllAdmin(lastUpdate.Message, telegramUrl)
 		mentionAll(admins, lastUpdate.Message.Chat.Id, telegramUrl)
+	}
+
+	if lastUpdate.Message.Text == "/joke@call_all_users_bot" {
+		sendJoke(lastUpdate.Message.Chat.Id, telegramUrl)
 	}
 
 	return nil

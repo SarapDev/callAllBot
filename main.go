@@ -18,7 +18,7 @@ func main() {
 	telegramUrl := os.Getenv("TG_BOT_URL")
 
 	for {
-		time.Sleep(5 * time.Second)
+		time.Sleep(2 * time.Second)
 
 		err := internal.GetUpdate(telegramUrl)
 		if err != nil {
